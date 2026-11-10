@@ -1,0 +1,310 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Dependency Security Scanner</title>
+    <link rel="stylesheet" href="style.css">
+</head>
+<body>
+
+    <header class="topbar">
+        <h2>🛡️ Dependency Scanner</h2>
+        <span class="status">● Security Scanner Online</span>
+    </header>
+
+    <main class="container">
+
+        <section class="welcome">
+            <h1>Security Dashboard</h1>
+            <p>Identify and manage vulnerabilities in your project dependencies.</p>
+        </section>
+
+        <section class="scan-box">
+            <h2>Scan Your Project</h2>
+            <p>Enter your project folder name to begin scanning.</p>
+
+            <div class="scan-controls">
+                <input
+                    type="text"
+                    id="projectName"
+                    value="test-project"
+                    placeholder="Enter project folder name"
+                >
+                <button id="scanButton" onclick="scanProject()">Scan Project</button>
+            </div>
+
+            <p id="scanStatus"></p>
+        </section>
+        <section class="scan-box">
+    <h2>Upload Your Project</h2>
+
+    <p>
+        Upload a ZIP file containing your software project
+        to detect vulnerable dependencies.
+    </p>
+
+    <div class="scan-controls">
+        <input
+            type="file"
+            id="projectFile"
+            accept=".zip"
+        >
+
+        <button id="uploadButton" onclick="uploadProject()">
+            Upload & Scan
+        </button>
+    </div>
+
+    <p id="uploadStatus"></p>
+</section>
+
+        <section class="stats">
+
+            <div class="card">
+                <h3>Total Vulnerabilities</h3>
+                <p id="totalVulnerabilities">0</p>
+            </div>
+
+            <div class="card critical">
+                <h3>Critical</h3>
+                <p id="criticalCount">0</p>
+            </div>
+
+            <div class="card high">
+                <h3>High</h3>
+                <p id="highCount">0</p>
+            </div>
+
+            <div class="card medium">
+                <h3>Medium</h3>
+                <p id="mediumCount">0</p>
+            </div>
+
+            <div class="card low">
+                <h3>Low</h3>
+                <p id="lowCount">0</p>
+            </div>
+
+        </section>
+
+        <section class="risk-box">
+
+    <h2>Project Risk Assessment</h2>
+
+    <div class="risk-dashboard">
+
+        <!-- Risk Score -->
+        <div class="risk-score-card">
+
+            <h3>Security Risk Score</h3>
+
+            <div class="risk-circle" id="riskCircle">
+                <span id="riskScore">0</span>
+                <small>/100</small>
+            </div>
+
+            <p>
+                Risk Level:
+                <strong id="riskLevel">Not Scanned</strong>
+            </p>
+
+        </div>
+
+        <!-- Severity Chart -->
+        <div class="severity-chart-card">
+
+            <h3>Vulnerability Distribution</h3>
+
+            <div class="severity-bar">
+                <span>Critical</span>
+                <div class="bar-background">
+                    <div id="criticalBar" class="bar-fill critical-bar"></div>
+                </div>
+                <strong id="criticalChartCount">0</strong>
+            </div>
+
+            <div class="severity-bar">
+                <span>High</span>
+                <div class="bar-background">
+                    <div id="highBar" class="bar-fill high-bar"></div>
+                </div>
+                <strong id="highChartCount">0</strong>
+            </div>
+
+            <div class="severity-bar">
+                <span>Medium</span>
+                <div class="bar-background">
+                    <div id="mediumBar" class="bar-fill medium-bar"></div>
+                </div>
+                <strong id="mediumChartCount">0</strong>
+            </div>
+
+            <div class="severity-bar">
+                <span>Low</span>
+                <div class="bar-background">
+                    <div id="lowBar" class="bar-fill low-bar"></div>
+                </div>
+                <strong id="lowChartCount">0</strong>
+            </div>
+
+        </div>
+
+    </div>
+
+</section>
+<!-- =================================
+     SCAN HISTORY SECTION
+================================= -->
+
+<section class="history-section">
+
+    <h2>Scan History</h2>
+
+    <p>View your previous security scans and track improvements.</p>
+
+    <div class="history-controls">
+
+        <button
+            id="compareScansButton"
+            onclick="compareLatestScans()"
+            disabled
+        >
+            Compare Latest Two Scans
+        </button>
+
+    </div>
+
+    <div id="comparisonResults"></div>
+
+    <div class="table-wrapper">
+
+        <table>
+
+            <thead>
+                <tr>
+                    <th>Project Name</th>
+                    <th>Scan Date</th>
+                    <th>Total Vulnerabilities</th>
+                    <th>Critical</th>
+                    <th>High</th>
+                    <th>Medium</th>
+                    <th>Low</th>
+                    <th>Risk Score</th>
+                    <th>Risk Level</th>
+                </tr>
+            </thead>
+
+            <tbody id="scanHistoryTable">
+
+                <tr>
+                    <td colspan="9">
+                        No scan history available yet.
+                    </td>
+                </tr>
+
+            </tbody>
+
+        </table>
+
+    </div>
+
+</section>
+        <section class="table-section">
+            
+            <div class="report-header">
+    <h2>Detected Vulnerabilities</h2>
+
+   <div class="report-buttons">
+
+    <button id="rescanButton" onclick="rescanProject()" disabled>
+        🔄 Rescan Project
+    </button>
+
+    <button id="downloadCSV" onclick="downloadCSV()" disabled>
+        Download CSV
+    </button>
+
+    <button id="downloadJSON" onclick="downloadJSON()" disabled>
+        Download JSON
+    </button>
+
+</div>
+
+            <div class="table-wrapper">
+                <!-- REPORT DOWNLOAD SECTION -->
+
+<div class="report-downloads">
+
+    <h3>Download Security Reports</h3>
+
+    <button onclick="downloadJSONReport()">
+        Download JSON Report
+    </button>
+
+    <button onclick="downloadCSVReport()">
+        Download CSV Report
+    </button>
+    <button onclick="downloadPDFReport()">Download PDF Report</button>
+    
+
+
+</div>
+
+
+<!-- VULNERABILITY TABLE -->
+ <!-- Vulnerability Search and Filters -->
+
+<div class="table-controls">
+
+    <input
+        type="text"
+        id="searchInput"
+        placeholder="Search by CVE ID or package name..."
+    >
+
+    <select id="severityFilter">
+        <option value="ALL">All Severities</option>
+        <option value="CRITICAL">Critical</option>
+        <option value="HIGH">High</option>
+        <option value="MEDIUM">Medium</option>
+        <option value="LOW">Low</option>
+    </select>
+
+</div>
+<table>
+
+    <thead>
+        <tr>
+            <th>CVE ID</th>
+            <th>Package</th>
+            <th>Installed Version</th>
+            <th>Fixed Version</th>
+            <th>Severity</th>
+            <th>Fix Available</th>
+            <th>Fix Recommendation</th>
+            <th>CVE Details</th>
+        </tr>
+    </thead>
+
+    <tbody id="vulnerabilityTable">
+        <tr>
+            <td colspan="8">No scan results yet. Scan a project to begin.</td>
+        </tr>
+    </tbody>
+
+</table>
+
+</div>
+</section>
+
+    </main>
+
+    <footer>
+        <p>Automated Dependency Vulnerability Detection | Powered by Trivy</p>
+    </footer>
+
+    <script src="script.js"></script>
+
+</body>
+</html>

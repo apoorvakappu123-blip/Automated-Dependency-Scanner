@@ -1,0 +1,31 @@
+﻿# Python
+__pycache__/
+*.py[cod]
+.pytest_cache/
+
+# Virtual environments
+.venv/
+venv/
+env/
+
+# Private credentials
+.env
+.env.*
+
+# Generated files
+reports/
+uploads/
+temp/
+*.log
+
+# Node.js
+node_modules/
+
+# VS Code
+.vscode/
+
+# Test files
+csv-test.zip
+test-upload.zip
+csv-test/
+test-project/
