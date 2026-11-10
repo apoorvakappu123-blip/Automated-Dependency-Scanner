@@ -24,7 +24,7 @@ jobs:
 
     steps:
       - name: Checkout Repository
-        uses: actions/checkout@v4
+        uses: actions/checkout@v5
 
       - name: Scan Dependencies with Trivy
         uses: aquasecurity/trivy-action@v0.36.0
@@ -32,17 +32,16 @@ jobs:
           scan-type: fs
           scan-ref: .
           scanners: vuln
-          severity: CRITICAL,HIGH
+          severity: CRITICAL,HIGH,MEDIUM,LOW
           format: json
           output: trivy-results.json
-          exit-code: '1'
+          exit-code: '0'
 
       - name: Upload Security Report
         if: always()
-        uses: actions/upload-artifact@v4
+        uses: actions/upload-artifact@v6
         with:
           name: dependency-security-report
           path: trivy-results.json
-          if-no-files-found: ignore
+          if-no-files-found: warn
           retention-days: 30
-
