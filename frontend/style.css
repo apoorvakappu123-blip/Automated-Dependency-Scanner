@@ -360,3 +360,66 @@ footer {
     }
 
 }
+/* =================================
+   GITHUB ACTIONS SECURITY REPORT
+================================= */
+
+#githubActionsSection {
+    border-top: 4px solid #2563eb;
+}
+
+#githubActionsSection h2 {
+    color: #1e293b;
+    margin-bottom: 12px;
+}
+
+#githubActionsSection h3 {
+    color: #334155;
+}
+
+#githubReportStatus {
+    margin-top: 15px;
+    font-weight: 600;
+}
+
+#githubReportResults {
+    margin-top: 25px;
+}
+
+#githubReportResults .stats {
+    margin-top: 20px;
+}
+
+#downloadGitHubReport {
+    background: #16a34a;
+    color: white;
+    border: none;
+    padding: 13px 22px;
+    border-radius: 7px;
+    cursor: pointer;
+    font-size: 15px;
+    font-weight: 600;
+    margin-top: 15px;
+}
+
+#downloadGitHubReport:hover {
+    background: #15803d;
+}
+
+#githubReportButton {
+    background: #2563eb;
+    color: white;
+}
+
+#githubReportButton:disabled {
+    opacity: 0.6;
+    cursor: not-allowed;
+}
+
+@media (max-width: 600px) {
+
+    #githubActionsSection .stats {
+        grid-template-columns: 1fr;
+    }
+
+}

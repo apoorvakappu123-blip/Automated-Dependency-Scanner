@@ -1,4 +1,5 @@
 from flask import Flask, request, jsonify
+from dotenv import load_dotenv
 from flask_cors import CORS
 from pathlib import Path, PurePosixPath
 from werkzeug.exceptions import RequestEntityTooLarge
@@ -18,21 +19,230 @@ from reportlab.platypus import (
     PageBreak
 )
 from reportlab.lib.utils import simpleSplit
-
 import os
 import tempfile
 import zipfile
 import stat
 import shutil
+import json
+import urllib.request
+import urllib.error
 
-from backend.scanner import scan_project
-from backend.analyzer import analyze_report
+
+from scanner import scan_project
+from analyzer import analyze_report
+from database import init_db, save_scan_history, SessionLocal, ScanHistory
 
 
 app = Flask(__name__)
-CORS(app)
+frontend_origin = os.getenv("FRONTEND_URL", "http://127.0.0.1:8000")
+CORS(app, resources={r"/api/*": {"origins": frontend_origin}})
 
 BASE_DIR = Path(__file__).resolve().parent.parent
+load_dotenv(Path(__file__).resolve().parent / ".env")
+
+# Initialize PostgreSQL tables when the application starts
+init_db()
+# GitHub Actions Configuration
+GITHUB_OWNER = "apoorvakappu123-blip"
+GITHUB_REPO = "Automated-Dependency-Scanner"
+
+GITHUB_ARTIFACT_NAME = "dependency-security-report"
+GITHUB_REPORT_NAME = "trivy-results.json"
+# ==========================================
+# GITHUB ACTIONS SECURITY REPORT ENDPOINT
+# ==========================================
+
+@app.route("/api/github-report", methods=["GET"])
+def github_report():
+
+    token = os.environ.get("GITHUB_TOKEN")
+
+    if not token:
+        return jsonify({
+            "status": "error",
+            "message": "GitHub API token is not configured."
+        }), 500
+
+    try:
+
+        # STEP 1: Retrieve GitHub artifacts
+
+        api_url = (
+            f"https://api.github.com/repos/"
+            f"{GITHUB_OWNER}/{GITHUB_REPO}/actions/artifacts"
+            f"?name={GITHUB_ARTIFACT_NAME}&per_page=100"
+        )
+
+        headers = {
+            "Accept": "application/vnd.github+json",
+            "Authorization": f"Bearer {token}",
+            "User-Agent": "Automated-Dependency-Scanner"
+        }
+
+        request_obj = urllib.request.Request(
+            api_url,
+            headers=headers
+        )
+
+        with urllib.request.urlopen(
+            request_obj,
+            timeout=30
+        ) as response:
+
+            artifact_data = json.loads(response.read())
+
+        artifacts = artifact_data.get("artifacts", [])
+
+        # STEP 2: Ignore expired artifacts
+
+        valid_artifacts = [
+            artifact for artifact in artifacts
+            if not artifact.get("expired", True)
+        ]
+
+        if not valid_artifacts:
+            return jsonify({
+                "status": "error",
+                "message": "No valid GitHub security report found."
+            }), 404
+
+        # STEP 3: Select latest artifact
+
+        latest_artifact = max(
+            valid_artifacts,
+            key=lambda item: item.get("created_at", "")
+        )
+
+        artifact_id = latest_artifact["id"]
+
+        # STEP 4: Download artifact ZIP
+
+        download_url = (
+            f"https://api.github.com/repos/"
+            f"{GITHUB_OWNER}/{GITHUB_REPO}/actions/artifacts/"
+            f"{artifact_id}/zip"
+        )
+
+        download_request = urllib.request.Request(
+            download_url,
+            headers=headers
+        )
+
+        # Prevent GitHub token from being forwarded to Azure.
+
+        class NoRedirectHandler(urllib.request.HTTPRedirectHandler):
+
+            def redirect_request(
+                self, req, fp, code, msg, headers, newurl
+            ):
+                return None
+
+        opener = urllib.request.build_opener(
+            NoRedirectHandler
+        )
+
+        try:
+
+            with opener.open(
+                download_request,
+                timeout=60
+            ) as response:
+
+                zip_data = response.read()
+
+        except urllib.error.HTTPError as redirect_error:
+
+            if redirect_error.code not in (301, 302, 303, 307, 308):
+                raise
+
+            redirect_url = redirect_error.headers.get("Location")
+
+            if not redirect_url:
+                raise Exception(
+                    "GitHub artifact download redirect URL is missing."
+                )
+
+            # Download from Azure without sending GitHub token.
+
+            redirect_request = urllib.request.Request(
+                redirect_url,
+                headers={
+                    "User-Agent": "Automated-Dependency-Scanner"
+                }
+            )
+
+            with urllib.request.urlopen(
+                redirect_request,
+                timeout=60
+            ) as response:
+
+                zip_data = response.read()
+
+        # STEP 5: Read Trivy JSON report
+
+        with zipfile.ZipFile(BytesIO(zip_data)) as archive:
+
+            report_file = next(
+                (
+                    name for name in archive.namelist()
+                    if PurePosixPath(name).name == GITHUB_REPORT_NAME
+                ),
+                None
+            )
+
+            if report_file is None:
+                return jsonify({
+                    "status": "error",
+                    "message": "Trivy JSON report not found in artifact."
+                }), 404
+
+            report_data = json.loads(
+                archive.read(report_file)
+            )
+
+        # STEP 6: Analyze using existing analyzer
+
+        analysis = analyze_report(report_data)
+
+        return jsonify({
+            "status": "success",
+            "source": "GitHub Actions",
+            "repository": f"{GITHUB_OWNER}/{GITHUB_REPO}",
+            "artifact": GITHUB_ARTIFACT_NAME,
+            "scan_date": latest_artifact.get("created_at"),
+            "analysis": analysis
+        })
+
+    except urllib.error.HTTPError as e:
+
+        error_details = e.read().decode(
+            "utf-8",
+            errors="replace"
+        )
+
+        app.logger.error(
+            "GitHub API HTTP %s: %s",
+            e.code,
+            error_details
+        )
+
+        return jsonify({
+            "status": "error",
+            "message": f"GitHub API returned HTTP {e.code}.",
+            "details": error_details
+        }), 502
+
+    except Exception:
+
+        app.logger.exception(
+            "GitHub report retrieval failed"
+        )
+
+        return jsonify({
+            "status": "error",
+            "message": "Unable to retrieve GitHub security report."
+        }), 500
 
 # Maximum uploaded ZIP size: 50 MB
 app.config["MAX_CONTENT_LENGTH"] = 50 * 1024 * 1024
@@ -125,6 +335,16 @@ def scan():
         return jsonify(scan_result), 500
 
     analysis = analyze_report(scan_result["report"])
+
+    # Save folder scan history to PostgreSQL
+    try:
+        save_scan_history(
+            project_name,
+            "folder",
+            analysis
+        )
+    except Exception:
+        app.logger.exception("Failed to save folder scan history")
 
     return jsonify({
         "status": "success",
@@ -330,6 +550,16 @@ def upload_project():
             analysis = analyze_report(
                 scan_result["report"]
             )
+
+            # Save ZIP scan history to PostgreSQL
+            try:
+                save_scan_history(
+                    uploaded_file.filename,
+                    "zip",
+                    analysis
+                )
+            except Exception:
+                app.logger.exception("Failed to save ZIP scan history")
 
             return jsonify({
                 "status": "success",
@@ -655,6 +885,66 @@ def download_pdf():
         as_attachment=True,
         download_name=f"{safe_project_name}-security-report.pdf"
     )
+
+
+
+# ==========================================
+# POSTGRESQL SCAN HISTORY API
+# ==========================================
+
+@app.route("/api/history", methods=["GET"])
+def get_scan_history():
+
+    session = SessionLocal()
+
+    try:
+        records = (
+            session.query(ScanHistory)
+            .order_by(
+                ScanHistory.scanned_at.desc(),
+                ScanHistory.id.desc()
+            )
+            .limit(100)
+            .all()
+        )
+
+        history = []
+
+        for record in records:
+            history.append({
+                "id": record.id,
+                "project_name": record.project_name,
+                "scan_type": record.scan_type,
+                "scanned_at": (
+                    record.scanned_at.isoformat()
+                    if record.scanned_at else None
+                ),
+                "total_vulnerabilities": record.total_vulnerabilities,
+                "critical": record.critical,
+                "high": record.high,
+                "medium": record.medium,
+                "low": record.low,
+                "risk_score": record.risk_score,
+                "risk_level": record.risk_level,
+                "analysis": record.analysis
+            })
+
+        return jsonify({
+            "status": "success",
+            "total_records": len(history),
+            "history": history
+        })
+
+    except Exception:
+        app.logger.exception("Failed to retrieve PostgreSQL scan history")
+
+        return jsonify({
+            "status": "error",
+            "message": "Unable to retrieve scan history."
+        }), 500
+
+    finally:
+        session.close()
 
 
 if __name__ == "__main__":

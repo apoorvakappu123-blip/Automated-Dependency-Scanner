@@ -58,6 +58,76 @@
 
     <p id="uploadStatus"></p>
 </section>
+<!-- =================================
+     GITHUB ACTIONS SECURITY REPORT
+================================= -->
+
+<section class="scan-box" id="githubActionsSection">
+
+    <h2>GitHub Actions Security Report</h2>
+
+    <p>
+        Retrieve the latest automated Trivy security scan
+        report generated through GitHub Actions.
+    </p>
+
+    <div class="scan-controls">
+
+        <button
+            id="githubReportButton"
+            onclick="fetchGitHubReport()"
+        >
+            Fetch GitHub Actions Report
+        </button>
+
+    </div>
+
+    <p id="githubReportStatus"></p>
+
+    <div id="githubReportResults" style="display: none;">
+
+        <h3>Latest GitHub Security Scan</h3>
+
+        <div class="stats">
+
+            <div class="card">
+                <h3>Total Vulnerabilities</h3>
+                <p id="githubTotal">0</p>
+            </div>
+
+            <div class="card critical">
+                <h3>Critical</h3>
+                <p id="githubCritical">0</p>
+            </div>
+
+            <div class="card high">
+                <h3>High</h3>
+                <p id="githubHigh">0</p>
+            </div>
+
+            <div class="card medium">
+                <h3>Medium</h3>
+                <p id="githubMedium">0</p>
+            </div>
+
+            <div class="card low">
+                <h3>Low</h3>
+                <p id="githubLow">0</p>
+            </div>
+
+        </div>
+
+        <button
+            id="downloadGitHubReport"
+            onclick="downloadGitHubReport()"
+        >
+            Download GitHub Security Report
+        </button>
+
+    </div>
+
+</section>
+
 
         <section class="stats">
 
@@ -165,12 +235,28 @@
 
     <div class="history-controls">
 
+        <label for="previousScanSelect">
+            First Scan:
+        </label>
+
+        <select id="previousScanSelect" disabled>
+            <option value="">Select first scan</option>
+        </select>
+
+        <label for="latestScanSelect">
+            Second Scan:
+        </label>
+
+        <select id="latestScanSelect" disabled>
+            <option value="">Select second scan</option>
+        </select>
+
         <button
             id="compareScansButton"
             onclick="compareLatestScans()"
             disabled
         >
-            Compare Latest Two Scans
+            Compare Selected Scans
         </button>
 
     </div>
@@ -304,6 +390,7 @@
         <p>Automated Dependency Vulnerability Detection | Powered by Trivy</p>
     </footer>
 
+    <script src="config.js"></script>
     <script src="script.js"></script>
 
 </body>

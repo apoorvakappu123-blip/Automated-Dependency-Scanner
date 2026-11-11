@@ -1,12 +1,16 @@
-const API_URL = "http://127.0.0.1:5000/api/scan";
-const UPLOAD_URL = "http://127.0.0.1:5000/api/upload";
-const PDF_URL = "http://127.0.0.1:5000/api/download-pdf";
+const API_BASE_URL = window.API_BASE_URL || "http://127.0.0.1:5000";
 
+const API_URL = `${API_BASE_URL}/api/scan`;
+const UPLOAD_URL = `${API_BASE_URL}/api/upload`;
+const PDF_URL = `${API_BASE_URL}/api/download-pdf`;
+const HISTORY_URL = `${API_BASE_URL}/api/history`;
+const GITHUB_REPORT_URL = `${API_BASE_URL}/api/github-report`;
 let latestAnalysis = null;
 let latestProjectName = "project";
 let latestScanDate = null;
 let latestUploadedFile = null;
 let latestScanType = null;
+let latestGitHubReport = null;
 
 
 // ======================================
@@ -818,66 +822,151 @@ document.getElementById("severityFilter")
 // 7. SCAN HISTORY
 // ======================================
 
-const HISTORY_KEY = "dependencyScannerHistory";
+// ======================================
+// 7. POSTGRESQL SCAN HISTORY
+// ======================================
+
+let scanHistoryRecords = [];
 
 
-// Save successful scan
+// Normalize PostgreSQL records for the existing dashboard
+
+function normalizeHistoryRecord(record) {
+
+    const analysis = record.analysis || {};
+
+    return {
+        id: record.id,
+        project_name: record.project_name,
+        scan_type: record.scan_type,
+        scan_date: record.scanned_at,
+        analysis: analysis,
+        total_vulnerabilities: record.total_vulnerabilities || 0,
+
+        severity_summary: analysis.severity_summary || {
+            CRITICAL: record.critical || 0,
+            HIGH: record.high || 0,
+            MEDIUM: record.medium || 0,
+            LOW: record.low || 0
+        },
+
+        risk_score: analysis.risk_score ?? record.risk_score ?? 0,
+        risk_level: analysis.risk_level || record.risk_level || "UNKNOWN",
+        vulnerabilities: analysis.vulnerabilities || []
+    };
+}
+
+
+// Refresh history from PostgreSQL
+
+async function loadScanHistory() {
+
+    const response = await fetch(HISTORY_URL);
+
+    const data = await response.json();
+
+    if (!response.ok || data.status !== "success") {
+        throw new Error(data.message || "Unable to load scan history.");
+    }
+
+    scanHistoryRecords = (data.history || [])
+        .map(normalizeHistoryRecord);
+
+    return scanHistoryRecords;
+}
+
+
+// Called after a successful scan.
+// The backend already saves the scan in PostgreSQL.
 
 function saveScanToHistory(analysis) {
 
-    try {
+    renderScanHistory();
 
-        let history = JSON.parse(
-            localStorage.getItem(HISTORY_KEY) || "[]"
-        );
+}
 
-        const scanRecord = {
 
-            project_name: latestProjectName,
+// Populate the scan comparison dropdowns.
 
-            scan_date: latestScanDate.toISOString(),
+function populateComparisonSelectors(history) {
 
-            total_vulnerabilities:
-                analysis.total_vulnerabilities || 0,
+    const firstSelect =
+        document.getElementById("previousScanSelect");
 
-            severity_summary:
-                analysis.severity_summary || {},
+    const secondSelect =
+        document.getElementById("latestScanSelect");
 
-            risk_score:
-                analysis.risk_score || 0,
+    const compareButton =
+        document.getElementById("compareScansButton");
 
-            risk_level:
-                analysis.risk_level || "UNKNOWN",
+    if (!firstSelect || !secondSelect) return;
 
-            vulnerabilities:
-                analysis.vulnerabilities || []
+    firstSelect.replaceChildren();
+    secondSelect.replaceChildren();
 
-        };
+    function addPlaceholder(select, label) {
+        const option = document.createElement("option");
+        option.value = "";
+        option.textContent = label;
+        select.appendChild(option);
+    }
 
-        history.push(scanRecord);
+    addPlaceholder(firstSelect, "Select first scan");
+    addPlaceholder(secondSelect, "Select second scan");
 
-        // Keep the latest 30 scans
-        history = history.slice(-30);
+    history.forEach(scan => {
 
-        localStorage.setItem(
-            HISTORY_KEY,
-            JSON.stringify(history)
-        );
+        const date = scan.scan_date
+            ? new Date(scan.scan_date).toLocaleString()
+            : "Unknown date";
 
-        renderScanHistory();
+        const label =
+            `#${scan.id} | ${scan.project_name} | ${date}`;
 
-    } catch (error) {
+        [firstSelect, secondSelect].forEach(select => {
 
-        console.error("Unable to save scan history:", error);
+            const option = document.createElement("option");
+
+            option.value = String(scan.id);
+            option.textContent = label;
+
+            select.appendChild(option);
+
+        });
+
+    });
+
+    firstSelect.disabled = history.length < 2;
+    secondSelect.disabled = history.length < 2;
+
+    if (history.length >= 2) {
+        firstSelect.value = String(history[1].id);
+        secondSelect.value = String(history[0].id);
+    }
+
+    function updateButton() {
+
+        if (compareButton) {
+            compareButton.disabled =
+                history.length < 2 ||
+                !firstSelect.value ||
+                !secondSelect.value ||
+                firstSelect.value === secondSelect.value;
+        }
 
     }
+
+    firstSelect.onchange = updateButton;
+    secondSelect.onchange = updateButton;
+
+    updateButton();
 
 }
 
 
 // Display scan history
 
-function renderScanHistory() {
+async function renderScanHistory() {
 
     const table = document.getElementById("scanHistoryTable");
 
@@ -886,19 +975,93 @@ function renderScanHistory() {
 
     if (!table) return;
 
-    const history = JSON.parse(
-        localStorage.getItem(HISTORY_KEY) || "[]"
-    );
+    try {
 
-    table.replaceChildren();
+        const history = await loadScanHistory();
 
-    if (history.length === 0) {
+        populateComparisonSelectors(history);
+
+        table.replaceChildren();
+
+        if (history.length === 0) {
+
+            const row = document.createElement("tr");
+            const cell = document.createElement("td");
+
+            cell.colSpan = 9;
+            cell.textContent = "No scan history available yet.";
+
+            row.appendChild(cell);
+            table.appendChild(row);
+
+            if (compareButton) {
+                compareButton.disabled = true;
+            }
+
+            return;
+        }
+
+        if (compareButton) {
+            compareButton.disabled = history.length < 2;
+        }
+
+        // PostgreSQL already returns newest scans first.
+
+        history.forEach(scan => {
+
+            const row = document.createElement("tr");
+
+            const summary = scan.severity_summary || {};
+
+            const values = [
+
+                scan.project_name,
+
+                scan.scan_date
+                    ? new Date(scan.scan_date).toLocaleString()
+                    : "N/A",
+
+                scan.total_vulnerabilities,
+
+                summary.CRITICAL || 0,
+
+                summary.HIGH || 0,
+
+                summary.MEDIUM || 0,
+
+                summary.LOW || 0,
+
+                scan.risk_score,
+
+                scan.risk_level
+
+            ];
+
+            values.forEach(value => {
+
+                const cell = document.createElement("td");
+
+                cell.textContent = value ?? "N/A";
+
+                row.appendChild(cell);
+
+            });
+
+            table.appendChild(row);
+
+        });
+
+    } catch (error) {
+
+        console.error("Unable to load PostgreSQL scan history:", error);
+
+        table.replaceChildren();
 
         const row = document.createElement("tr");
         const cell = document.createElement("td");
 
         cell.colSpan = 9;
-        cell.textContent = "No scan history available yet.";
+        cell.textContent = "Unable to load scan history. Please try again.";
 
         row.appendChild(cell);
         table.appendChild(row);
@@ -907,56 +1070,7 @@ function renderScanHistory() {
             compareButton.disabled = true;
         }
 
-        return;
     }
-
-    if (compareButton) {
-        compareButton.disabled = history.length < 2;
-    }
-
-    // Show newest scans first
-
-    history.slice().reverse().forEach(scan => {
-
-        const row = document.createElement("tr");
-
-        const summary = scan.severity_summary || {};
-
-        const values = [
-
-            scan.project_name,
-
-            new Date(scan.scan_date).toLocaleString(),
-
-            scan.total_vulnerabilities,
-
-            summary.CRITICAL || 0,
-
-            summary.HIGH || 0,
-
-            summary.MEDIUM || 0,
-
-            summary.LOW || 0,
-
-            scan.risk_score,
-
-            scan.risk_level
-
-        ];
-
-        values.forEach(value => {
-
-            const cell = document.createElement("td");
-
-            cell.textContent = value;
-
-            row.appendChild(cell);
-
-        });
-
-        table.appendChild(row);
-
-    });
 
 }
 
@@ -967,9 +1081,7 @@ function renderScanHistory() {
 
 function compareLatestScans() {
 
-    const history = JSON.parse(
-        localStorage.getItem(HISTORY_KEY) || "[]"
-    );
+    const history = scanHistoryRecords;
 
     const results =
         document.getElementById("comparisonResults");
@@ -978,24 +1090,46 @@ function compareLatestScans() {
 
     results.replaceChildren();
 
-    if (history.length < 2) {
+    const firstSelect =
+        document.getElementById("previousScanSelect");
+
+    const secondSelect =
+        document.getElementById("latestScanSelect");
+
+    if (!firstSelect || !secondSelect) return;
+
+    const firstId = firstSelect.value;
+    const secondId = secondSelect.value;
+
+    if (!firstId || !secondId || firstId === secondId) {
 
         results.textContent =
-            "You need at least two successful scans to compare.";
+            "Please select two different scans to compare.";
 
         return;
     }
 
-    const previous = history[history.length - 2];
-    const latest = history[history.length - 1];
+    const previous = history.find(
+        scan => String(scan.id) === firstId
+    );
+
+    const latest = history.find(
+        scan => String(scan.id) === secondId
+    );
+
+    if (!previous || !latest) {
+
+        results.textContent =
+            "Selected scan records could not be found. Refresh scan history and try again.";
+
+        return;
+    }
 
     const previousVulnerabilities =
         previous.vulnerabilities || [];
 
     const latestVulnerabilities =
         latest.vulnerabilities || [];
-
-    // Identify vulnerabilities using CVE ID and package
 
     const getKey = v =>
         `${v.id || "UNKNOWN"}::${v.package || "UNKNOWN"}`;
@@ -1019,8 +1153,6 @@ function compareLatestScans() {
     const remaining = latestVulnerabilities.filter(
         v => previousSet.has(getKey(v))
     );
-
-    // Display comparison
 
     const heading = document.createElement("h3");
 
@@ -1052,7 +1184,7 @@ function compareLatestScans() {
 
             const cell = document.createElement("td");
 
-            cell.textContent = value;
+            cell.textContent = value ?? "N/A";
 
             row.appendChild(cell);
 
@@ -1070,13 +1202,10 @@ function compareLatestScans() {
         <h3>Comparison Results</h3>
         <p>Fixed Vulnerabilities: <strong>${fixed.length}</strong></p>
         <p>New Vulnerabilities: <strong>${newlyDiscovered.length}</strong></p>
-        <p>Remaining Vulnerabilities: <strong>${remaining.length}</strong>
-        </p>
+        <p>Remaining Vulnerabilities: <strong>${remaining.length}</strong></p>
     `;
 
     results.appendChild(comparisonDetails);
-
-    // List fixed vulnerabilities
 
     const fixedHeading = document.createElement("h4");
     fixedHeading.textContent = "Fixed Vulnerabilities";
@@ -1087,9 +1216,7 @@ function compareLatestScans() {
     fixed.forEach(v => {
 
         const item = document.createElement("li");
-
-        item.textContent =
-            `${v.id} - ${v.package}`;
+        item.textContent = `${v.id} - ${v.package}`;
 
         fixedList.appendChild(item);
 
@@ -1101,8 +1228,6 @@ function compareLatestScans() {
 
     results.appendChild(fixedList);
 
-    // List newly discovered vulnerabilities
-
     const newHeading = document.createElement("h4");
     newHeading.textContent = "Newly Discovered Vulnerabilities";
     results.appendChild(newHeading);
@@ -1112,9 +1237,7 @@ function compareLatestScans() {
     newlyDiscovered.forEach(v => {
 
         const item = document.createElement("li");
-
-        item.textContent =
-            `${v.id} - ${v.package}`;
+        item.textContent = `${v.id} - ${v.package}`;
 
         newList.appendChild(item);
 
@@ -1129,9 +1252,59 @@ function compareLatestScans() {
 }
 
 
-// Load saved history when dashboard opens
+// Load PostgreSQL history when dashboard opens
 
 renderScanHistory();
+
+
+// Restore the latest saved scan into the dashboard after refresh.
+
+async function restoreLatestScan() {
+
+    try {
+
+        const history = await loadScanHistory();
+
+        if (!history.length) {
+            return;
+        }
+
+        const latest = history[0];
+
+        if (!latest.analysis) {
+            console.warn("Latest history record has no saved analysis.");
+            return;
+        }
+
+        latestProjectName = latest.project_name || "project";
+
+        // Folder scans can be rescanned.
+        // ZIP scans need the original file to be uploaded again.
+        latestScanType =
+            latest.scan_type === "folder" ? "folder" : null;
+
+        latestUploadedFile = null;
+
+        displayResults(latest.analysis);
+
+        // Restore the original scan date after displayResults().
+        latestScanDate = latest.scan_date
+            ? new Date(latest.scan_date)
+            : new Date();
+
+        console.log("Latest PostgreSQL scan restored successfully.");
+
+    } catch (error) {
+
+        console.error("Unable to restore latest scan:", error);
+
+    }
+
+}
+
+restoreLatestScan();
+
+
 // ======================================
 //  RESCAN PROJECT
 // ======================================
@@ -1247,5 +1420,116 @@ async function rescanProject() {
         rescanButton.textContent = "🔄 Rescan Project";
 
     }
+
+}
+// ======================================
+// 9. FETCH GITHUB ACTIONS SECURITY REPORT
+// ======================================
+
+async function fetchGitHubReport() {
+
+    const button = document.getElementById("githubReportButton");
+    const status = document.getElementById("githubReportStatus");
+    const results = document.getElementById("githubReportResults");
+
+    button.disabled = true;
+    button.textContent = "Fetching Report...";
+
+    status.textContent = "Connecting to GitHub Actions. Please wait...";
+    status.style.color = "#2563eb";
+
+    results.style.display = "none";
+
+    try {
+
+        const response = await fetch(GITHUB_REPORT_URL);
+
+        const data = await response.json();
+
+        if (!response.ok || data.status !== "success") {
+            throw new Error(
+                data.message || "Unable to retrieve GitHub security report."
+            );
+        }
+
+        const analysis = data.analysis;
+
+        if (!analysis || !analysis.severity_summary) {
+            throw new Error("GitHub report has an unexpected format.");
+        }
+
+        // Store GitHub report separately.
+        // Do not overwrite the existing local scan.
+
+        latestGitHubReport = data;
+
+        const summary = analysis.severity_summary;
+
+        // Update GitHub report statistics.
+
+        document.getElementById("githubTotal").textContent =
+            analysis.total_vulnerabilities ?? 0;
+
+        document.getElementById("githubCritical").textContent =
+            summary.CRITICAL ?? 0;
+
+        document.getElementById("githubHigh").textContent =
+            summary.HIGH ?? 0;
+
+        document.getElementById("githubMedium").textContent =
+            summary.MEDIUM ?? 0;
+
+        document.getElementById("githubLow").textContent =
+            summary.LOW ?? 0;
+
+        results.style.display = "block";
+
+        status.textContent =
+            "GitHub Actions security report retrieved successfully!";
+
+        status.style.color = "green";
+
+    } catch (error) {
+
+        console.error("GitHub report error:", error);
+
+        status.textContent = "Error: " + error.message;
+        status.style.color = "red";
+
+    } finally {
+
+        button.disabled = false;
+        button.textContent = "Fetch GitHub Actions Report";
+
+    }
+}
+
+
+// ======================================
+// 10. DOWNLOAD GITHUB ACTIONS REPORT
+// ======================================
+
+function downloadGitHubReport() {
+
+    if (!latestGitHubReport) {
+
+        alert("Please fetch the GitHub Actions report first.");
+
+        return;
+    }
+
+    const reportContent = JSON.stringify(
+        latestGitHubReport,
+        null,
+        4
+    );
+
+    // Reuse your existing downloadFile() function.
+
+    downloadFile(
+        reportContent,
+        "github-security-report.json",
+        "application/json"
+    );
 
 }

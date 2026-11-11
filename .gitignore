@@ -29,3 +29,9 @@ csv-test.zip
 test-upload.zip
 csv-test/
 test-project/
+
+backend/.env
+
+# Local backup files
+*.bak
+*.backup_*

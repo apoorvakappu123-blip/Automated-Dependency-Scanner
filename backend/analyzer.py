@@ -1,6 +1,5 @@
 import re
 
-
 def extract_version(version_string):
     if not version_string:
         return None
@@ -13,6 +12,7 @@ def extract_version(version_string):
     return tuple(
         int(part) for part in match.group().split(".")
     )
+
 
 
 def get_upgrade_command(package, version, ecosystem):
